@@ -1,0 +1,56 @@
+{
+  "1": {
+    "inputs": {
+      "image": "example.png",
+      "upload": "image"
+    },
+    "class_type": "LoadImage",
+    "_meta": {
+      "title": "Load Image"
+    }
+  },
+  "2": {
+    "inputs": {
+      "filename_prefix": "ComfyUI",
+      "images": [
+        "4",
+        0
+      ]
+    },
+    "class_type": "SaveImage",
+    "_meta": {
+      "title": "Save Image"
+    }
+  },
+  "3": {
+    "inputs": {
+      "model": "sam2_hiera_tiny.safetensors",
+      "segmentor": "realtime",
+      "device": "cuda",
+      "precision": "fp16"
+    },
+    "class_type": "DownloadAndLoadSAM2RealtimeModel",
+    "_meta": {
+      "title": "(Down)Load SAM2-Realtime Model"
+    }
+  },
+  "4": {
+    "inputs": {
+      "keep_model_loaded": true,
+      "coordinates_positive": "[384,384]",
+      "individual_objects": false,
+      "images": [
+        "1",
+        0
+      ],
+      "sam2_model": [
+        "3",
+        0
+      ]
+    },
+    "class_type": "Sam2RealtimeSegmentation",
+    "_meta": {
+      "title": "Sam2RealtimeSegmentation"
+    }
+  }
+}
