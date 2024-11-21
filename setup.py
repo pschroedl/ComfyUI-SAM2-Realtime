@@ -8,9 +8,9 @@ from setuptools import find_packages, setup
 from torch.utils.cpp_extension import BuildExtension, CUDAExtension
 
 # Package metadata
-NAME = "SAM 2 Realtime"
+NAME = "SAM2 Realtime"
 VERSION = "1.0"
-DESCRIPTION = "SAM 2 Realtime: Segment Anything for Video Streams"
+DESCRIPTION = "SAM2 Realtime: Segment Anything for Video Streams"
 URL = "https://github.com/facebookresearch/segment-anything-2"
 AUTHOR = "Peter Schroedl"
 AUTHOR_EMAIL = "peter_schroedl@me.com"
@@ -53,7 +53,7 @@ setup(
     license=LICENSE,
     packages=find_packages(),
     install_requires=REQUIRED_PACKAGES,
-    python_requires=">=3.10.0",
+    python_requires=">=3.11.10",
     ext_modules=get_extensions(),
     cmdclass={"build_ext": BuildExtension.with_options(no_python_abi_suffix=True)},
 )

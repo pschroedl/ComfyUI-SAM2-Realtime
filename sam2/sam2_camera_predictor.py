@@ -39,6 +39,31 @@ class SAM2CameraPredictor(SAM2Base):
         self.condition_state = {}
         self.frame_idx = 0
 
+    # def prepare_data(
+    #     self,
+    #     img,
+    #     image_size=1024,
+    #     img_mean=(0.485, 0.456, 0.406),
+    #     img_std=(0.229, 0.224, 0.225),
+    # ):
+    #     if isinstance(img, np.ndarray):
+    #         img_np = img
+    #         print(f"img_np type: {type(img_np)}, shape: {img_np.shape}")
+    #         img_np = cv2.resize(img_np, (image_size, image_size)) / 255.0
+    #         height, width = img.shape[:2]
+    #     else:
+    #         img_np = (
+    #             np.array(img.convert("RGB").resize((image_size, image_size))) / 255.0
+    #         )
+    #         width, height = img.size
+    #     img = torch.from_numpy(img_np).permute(2, 0, 1).float()
+
+    #     img_mean = torch.tensor(img_mean, dtype=torch.float32)[:, None, None]
+    #     img_std = torch.tensor(img_std, dtype=torch.float32)[:, None, None]
+    #     img -= img_mean
+    #     img /= img_std
+    #     return img, width, height
+
     def prepare_data(
         self,
         img,
@@ -47,25 +72,34 @@ class SAM2CameraPredictor(SAM2Base):
         img_std=(0.229, 0.224, 0.225),
     ):
         if isinstance(img, np.ndarray):
-            img_np = img
-            print(f"img_np type: {type(img_np)}, shape: {img_np.shape}")
-            img_np = cv2.resize(img_np, (image_size, image_size)) / 255.0
-            height, width = img.shape[:2]
+            # Convert numpy array to tensor
+            img = torch.from_numpy(img).permute(2, 0, 1).float()  # HWC -> CHW
+        elif isinstance(img, torch.Tensor):
+            # Ensure tensor is in CHW format
+            if img.ndim == 3 and img.shape[0] != 3:  # If HWC, convert to CHW
+                img = img.permute(2, 0, 1)
+            img = img.float()
         else:
-            img_np = (
-                np.array(img.convert("RGB").resize((image_size, image_size))) / 255.0
-            )
-            width, height = img.size
-        img = torch.from_numpy(img_np).permute(2, 0, 1).float()
+            raise ValueError("Input must be a numpy array or a PyTorch tensor")
 
-        img_mean = torch.tensor(img_mean, dtype=torch.float32)[:, None, None]
-        img_std = torch.tensor(img_std, dtype=torch.float32)[:, None, None]
+        # Resize to the target size (supports tensor resizing)
+        img = torch.nn.functional.interpolate(
+            img.unsqueeze(0), size=(image_size, image_size), mode="bilinear", align_corners=False
+        ).squeeze(0)
+
+        # Normalize
+        img_mean = torch.tensor(img_mean, dtype=torch.float32, device=img.device)[:, None, None]
+        img_std = torch.tensor(img_std, dtype=torch.float32, device=img.device)[:, None, None]
         img -= img_mean
         img /= img_std
+
+        height, width = img.shape[1:]  # CHW format
         return img, width, height
 
     @torch.inference_mode()
     def load_first_frame(self, img):
+        if isinstance(img, torch.Tensor):
+            img = img.to(self.device)  # Ensure the tensor is on the correct device
 
         self.condition_state = self._init_state(
             offload_video_to_cpu=False, offload_state_to_cpu=False
@@ -78,6 +112,9 @@ class SAM2CameraPredictor(SAM2Base):
         self._get_image_feature(frame_idx=0, batch_size=1)
 
     def add_conditioning_frame(self, img):
+        if isinstance(img, torch.Tensor):
+            img = img.to(self.device)  # Ensure the tensor is on the correct device
+
         img, width, height = self.prepare_data(img, image_size=self.image_size)
         self.condition_state["images"].append(img)
         self.condition_state["num_frames"] = len(self.condition_state["images"])
@@ -754,6 +791,9 @@ class SAM2CameraPredictor(SAM2Base):
         self.condition_state["num_frames"] += 1
         if not self.condition_state["tracking_has_started"]:
             self.propagate_in_video_preflight()
+
+        if isinstance(img, torch.Tensor):
+            img = img.to(self.device)  # Ensure the tensor is on the correct device
 
         img, _, _ = self.prepare_data(img, image_size=self.image_size)
 

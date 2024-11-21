@@ -1,9 +1,7 @@
 import torch
-from torch.functional import F
 import os
-import cv2
 import numpy as np
-
+import logging
 from .sam2.sam2_camera_predictor import SAM2CameraPredictor
 from comfy.utils import load_torch_file
 
@@ -22,7 +20,7 @@ class DownloadAndLoadSAM2RealtimeModel:
     def INPUT_TYPES(s):
         return {"required": {
             "model": ([ 
-                    'sam2_hiera_tiny.safetensors',
+                    'sam2_hiera_tiny.pt',
                     ],),
             "segmentor": (
                     ['realtime'],
@@ -60,13 +58,14 @@ class DownloadAndLoadSAM2RealtimeModel:
         model_path = os.path.join(download_path, model)
         print("model_path: ", model_path)
         
-        if not os.path.exists(model_path):
-            print(f"Downloading SAM2 model to: {model_path}")
-            from huggingface_hub import snapshot_download
-            snapshot_download(repo_id="Kijai/sam2-safetensors",
-                            allow_patterns=[f"*{model}*"],
-                            local_dir=download_path,
-                            local_dir_use_symlinks=False)
+        # TODO: Safetensorize model and upload to huggingface? 
+        # if not os.path.exists(model_path):
+        #     print(f"Downloading SAM2 model to: {model_path}")
+        #     from huggingface_hub import snapshot_download
+        #     snapshot_download(repo_id="Kijai/sam2-safetensors",
+        #                     allow_patterns=[f"*{model}*"],
+        #                     local_dir=download_path,
+        #                     local_dir_use_symlinks=False)
 
         config_dir = os.path.join(script_directory, "sam2_configs") 
 
@@ -92,8 +91,22 @@ class DownloadAndLoadSAM2RealtimeModel:
 
             model = instantiate(cfg.model, _recursive_=True)
         
-        sd = load_torch_file(model_path)
-        model.load_state_dict(sd)
+        def _load_checkpoint(model, ckpt_path):
+            if ckpt_path is not None:
+                sd = torch.load(ckpt_path, map_location="cpu")["model"]
+                missing_keys, unexpected_keys = model.load_state_dict(sd)
+                if missing_keys:
+                    logging.error(missing_keys)
+                    raise RuntimeError()
+                if unexpected_keys:
+                    logging.error(unexpected_keys)
+                    raise RuntimeError()
+                logging.info("Loaded checkpoint sucessfully")
+
+        _load_checkpoint(model, model_path)
+
+        # sd = load_torch_file(model_path)
+        # model.load_state_dict(sd)
         device = "cuda" if torch.cuda.is_available() else "cpu"
         model = model.to(device)
         model.eval()
@@ -159,62 +172,39 @@ class Sam2RealtimeSegmentation:
             self.predictor = model
 
         def process_frame(frame, frame_idx):
-            with torch.inference_mode(), torch.autocast("cuda", dtype=torch.bfloat16):
-                height = 512
-                width = 512
-
-                img_np = frame.numpy()
-                if img_np.shape[-1] != 3:
-                    img_np = img_np.transpose(1, 2, 0)  # CHW to HWC
-                if img_np.max() <= 1.0:
-                    img_np = (img_np * 255).astype(np.uint8)
-                
-                frame = img_np
+            with torch.inference_mode(), torch.autocast("cuda", dtype=torch.float16):
+                frame = frame.to(device).float()  # Keep everything in torch
 
                 if not self.if_init:
                     self.predictor.load_first_frame(frame)
                     self.if_init = True
                     obj_id = 1
-
-                    # Define point prompt (e.g., background selection for demo purposes)
-                    # point = [int(width * 2 / 3), int(height / 2)]
-                    point = [384,384]
+                    point = [384, 384]
                     points = [point]
                     labels = [1]
-
                     _, _, out_mask_logits = self.predictor.add_new_prompt(frame_idx, obj_id, points=points, labels=labels)
                 else:
-                    # Track objects in subsequent frames
                     out_obj_ids, out_mask_logits = self.predictor.track(frame)
 
-            # Process output mask only if it's non-empty
-            if out_mask_logits.shape[0] > 0:
-                # Apply threshold at 0.5
-                mask = (out_mask_logits[0, 0] > 0.5).cpu().numpy().astype("uint8") * 255
-            else:
-                mask = np.zeros((frame.shape[0], frame.shape[1]), dtype="uint8")
+                if out_mask_logits.shape[0] > 0:
+                    mask = (out_mask_logits[0, 0] > 0.5).byte()
+                    mask = torch.nn.functional.interpolate(
+                        mask.unsqueeze(0).unsqueeze(0), 
+                        size=(frame.shape[0], frame.shape[1]), 
+                        mode='nearest'
+                    ).squeeze(0).squeeze(0)
+                else:
+                    mask = torch.zeros((frame.shape[0], frame.shape[1]), device=device, dtype=torch.uint8)
 
-            # Ensure the mask matches frame dimensions
-            if mask.shape[:2] != frame.shape[:2]:
-                mask = cv2.resize(mask, (frame.shape[1], frame.shape[0]), interpolation=cv2.INTER_NEAREST)
+                mask_colored = torch.stack([mask] * 3, dim=2)  # Create 3-channel mask
+                overlayed_frame = torch.add(frame * 0.7, mask_colored * 0.3)
+                processed_frames.append(overlayed_frame)
 
-            # Convert the mask to a 3-channel image without inversion
-            mask_colored = cv2.cvtColor(mask, cv2.COLOR_GRAY2BGR)
-            if mask_colored.shape != frame.shape:
-                mask_colored = cv2.resize(mask_colored, (frame.shape[1], frame.shape[0]))
-
-            # Ensure matching types for blending
-            frame = frame.astype(np.uint8)
-            mask_colored = mask_colored.astype(np.uint8)
-
-            # Blend the frame with the mask
-            overlayed_frame = cv2.addWeighted(frame, 0.7, mask_colored, 0.3, 0)
-
-            image_tensor = torch.from_numpy(overlayed_frame).float() / 255.0  # Normalize to [0, 1]
-            processed_frames.append(image_tensor)
-
+        # Avoid keeping all frames in memory
         for frame_idx, img in enumerate(images):
             process_frame(img, frame_idx)
+            if frame_idx % 10 == 0:
+                torch.cuda.empty_cache()
 
         stacked_frames = torch.stack(processed_frames, dim=0) 
         return (stacked_frames,)

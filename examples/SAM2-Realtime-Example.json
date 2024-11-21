@@ -13,7 +13,7 @@
     "inputs": {
       "filename_prefix": "ComfyUI",
       "images": [
-        "4",
+        "8",
         0
       ]
     },
@@ -22,9 +22,9 @@
       "title": "Save Image"
     }
   },
-  "3": {
+  "7": {
     "inputs": {
-      "model": "sam2_hiera_tiny.safetensors",
+      "model": "sam2_hiera_tiny.pt",
       "segmentor": "realtime",
       "device": "cuda",
       "precision": "fp16"
@@ -34,17 +34,17 @@
       "title": "(Down)Load SAM2-Realtime Model"
     }
   },
-  "4": {
+  "8": {
     "inputs": {
       "keep_model_loaded": true,
-      "coordinates_positive": "[384,384]",
+      "coordinates_positive": "[384, 384]",
       "individual_objects": false,
       "images": [
         "1",
         0
       ],
       "sam2_model": [
-        "3",
+        "7",
         0
       ]
     },
