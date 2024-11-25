@@ -2,6 +2,7 @@ import torch
 import os
 import numpy as np
 import logging
+import json
 from .sam2.sam2_camera_predictor import SAM2CameraPredictor
 from comfy.utils import load_torch_file
 
@@ -139,8 +140,8 @@ class Sam2RealtimeSegmentation:
             },
         }
 
-    RETURN_NAMES = ("PROCESSED_IMAGES",)
-    RETURN_TYPES = ("IMAGE",)
+    RETURN_NAMES = ("PROCESSED_IMAGES","MASK",)
+    RETURN_TYPES = ("IMAGE", "IMAGE",)
     FUNCTION = "segment_images"
     CATEGORY = "SAM2-Realtime"
 
@@ -166,10 +167,10 @@ class Sam2RealtimeSegmentation:
         model.to(device)
 
         processed_frames = []
-        
+        mask_list = []
         # The `model` variable is now ready and equivalent to `predictor` returned by sam2.build_sam.build_sam2_camera_predictor
         if self.predictor is None:
-            self.predictor = model
+            self.predictor = model   
 
         def process_frame(frame, frame_idx):
             with torch.inference_mode(), torch.autocast("cuda", dtype=torch.float16):
@@ -187,27 +188,38 @@ class Sam2RealtimeSegmentation:
                     out_obj_ids, out_mask_logits = self.predictor.track(frame)
 
                 if out_mask_logits.shape[0] > 0:
+                    # Ensure out_mask_logits is on the same device
+                    out_mask_logits = out_mask_logits.to(device)
                     mask = (out_mask_logits[0, 0] > 0.5).byte()
                     mask = torch.nn.functional.interpolate(
-                        mask.unsqueeze(0).unsqueeze(0), 
+                        mask.unsqueeze(0).unsqueeze(0).float(), 
                         size=(frame.shape[0], frame.shape[1]), 
                         mode='nearest'
-                    ).squeeze(0).squeeze(0)
+                    ).squeeze(0).squeeze(0).byte().to(device)  # Move the interpolated mask to the correct device
                 else:
-                    mask = torch.zeros((frame.shape[0], frame.shape[1]), device=device, dtype=torch.uint8)
+                    mask = torch.ones((frame.shape[0], frame.shape[1]), device=device, dtype=torch.uint8)
 
-                mask_colored = torch.stack([mask] * 3, dim=2)  # Create 3-channel mask
-                overlayed_frame = torch.add(frame * 0.7, mask_colored * 0.3)
+                # Ensure frame is on the same device
+                frame = frame.to(device)
+
+                mask_colored = torch.stack([mask] * 3, dim=2).to(device)  # Create 3-channel mask and move to device
+
+                overlayed_frame = torch.add(frame * 0.7, mask_colored * 0.3).to(device)
                 processed_frames.append(overlayed_frame)
+
+                constructed_mask = torch.add(frame * 0.1, mask_colored * 0.9).to(device)
+                mask_list.append(constructed_mask)
+
 
         # Avoid keeping all frames in memory
         for frame_idx, img in enumerate(images):
             process_frame(img, frame_idx)
-            if frame_idx % 10 == 0:
-                torch.cuda.empty_cache()
+            # if frame_idx % 10 == 0:
+            #     torch.cuda.empty_cache()
 
+        stacked_masks = torch.stack(mask_list, dim=0)
         stacked_frames = torch.stack(processed_frames, dim=0) 
-        return (stacked_frames,)
+        return (stacked_frames, stacked_masks)
 
 NODE_CLASS_MAPPINGS = {
     "DownloadAndLoadSAM2RealtimeModel": DownloadAndLoadSAM2RealtimeModel,
