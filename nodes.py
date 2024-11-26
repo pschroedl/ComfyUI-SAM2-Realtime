@@ -54,7 +54,9 @@ class DownloadAndLoadSAM2RealtimeModel:
         dtype = {"bf16": torch.bfloat16, "fp16": torch.float16, "fp32": torch.float32}[precision]
         device = {"cuda": torch.device("cuda"), "cpu": torch.device("cpu"), "mps": torch.device("mps")}[device]
 
-        download_path = os.path.join(folder_paths.models_dir, "sam2")
+        # download_path = os.path.join(folder_paths.models_dir, "sam2")
+        docker_container_path = "/models/ComfyUI--models"
+        download_path = os.path.join(docker_container_path, "sam2")
         model_path = os.path.join(download_path, model)
         print("model_path: ", model_path)
 
