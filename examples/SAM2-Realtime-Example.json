@@ -36,9 +36,8 @@
   },
   "8": {
     "inputs": {
-      "keep_model_loaded": true,
-      "coordinates_positive": "[384, 384]",
-      "individual_objects": false,
+      "coordinates_positive": "[[384, 384]]",
+      "point_labels": "[1]",
       "images": [
         "1",
         0
