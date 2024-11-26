@@ -45,31 +45,6 @@ class SAM2CameraPredictor(SAM2Base):
         self.condition_state = {}
         self.frame_idx = 0
 
-    # def prepare_data(
-    #     self,
-    #     img,
-    #     image_size=1024,
-    #     img_mean=(0.485, 0.456, 0.406),
-    #     img_std=(0.229, 0.224, 0.225),
-    # ):
-    #     if isinstance(img, np.ndarray):
-    #         img_np = img
-    #         print(f"img_np type: {type(img_np)}, shape: {img_np.shape}")
-    #         img_np = cv2.resize(img_np, (image_size, image_size)) / 255.0
-    #         height, width = img.shape[:2]
-    #     else:
-    #         img_np = (
-    #             np.array(img.convert("RGB").resize((image_size, image_size))) / 255.0
-    #         )
-    #         width, height = img.size
-    #     img = torch.from_numpy(img_np).permute(2, 0, 1).float()
-
-    #     img_mean = torch.tensor(img_mean, dtype=torch.float32)[:, None, None]
-    #     img_std = torch.tensor(img_std, dtype=torch.float32)[:, None, None]
-    #     img -= img_mean
-    #     img /= img_std
-    #     return img, width, height
-
     def prepare_data(
         self,
         img,

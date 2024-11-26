@@ -1,8 +1,10 @@
 import torch
 import os
+import requests
 import numpy as np
 import logging
 import json
+import ast
 from .sam2.sam2_camera_predictor import SAM2CameraPredictor
 from comfy.utils import load_torch_file
 
@@ -53,20 +55,22 @@ class DownloadAndLoadSAM2RealtimeModel:
         device = {"cuda": torch.device("cuda"), "cpu": torch.device("cpu"), "mps": torch.device("mps")}[device]
 
         download_path = os.path.join(folder_paths.models_dir, "sam2")
-        if precision != 'fp32' and "2.1" in model:
-            base_name, extension = model.rsplit('.', 1)
-            model = f"{base_name}-fp16.{extension}"
         model_path = os.path.join(download_path, model)
         print("model_path: ", model_path)
-        
-        # TODO: Safetensorize model and upload to huggingface? 
-        # if not os.path.exists(model_path):
-        #     print(f"Downloading SAM2 model to: {model_path}")
-        #     from huggingface_hub import snapshot_download
-        #     snapshot_download(repo_id="Kijai/sam2-safetensors",
-        #                     allow_patterns=[f"*{model}*"],
-        #                     local_dir=download_path,
-        #                     local_dir_use_symlinks=False)
+
+        url = "https://dl.fbaipublicfiles.com/segment_anything_2/072824/sam2_hiera_tiny.pt"
+
+        if not os.path.exists(model_path):
+            print(f"Downloading SAM2 model to: {model_path}")
+            response = requests.get(url, stream=True)
+            response.raise_for_status()
+
+            with open(model_path, "wb") as f:
+                for chunk in response.iter_content(chunk_size=8192):
+                    if chunk:
+                        f.write(chunk)
+
+            print(f"Model saved to {model_path}")
 
         config_dir = os.path.join(script_directory, "sam2_configs") 
 
@@ -106,8 +110,6 @@ class DownloadAndLoadSAM2RealtimeModel:
 
         _load_checkpoint(model, model_path)
 
-        # sd = load_torch_file(model_path)
-        # model.load_state_dict(sd)
         device = "cuda" if torch.cuda.is_available() else "cpu"
         model = model.to(device)
         model.eval()
@@ -129,14 +131,15 @@ class Sam2RealtimeSegmentation:
             "required": {
                 "images": ("IMAGE",),
                 "sam2_model": ("SAM2MODEL",),
-                "keep_model_loaded": ("BOOLEAN", {"default": True}),
+                # "keep_model_loaded": ("BOOLEAN", {"default": True}),
             },
            "optional": {
                 "coordinates_positive": ("STRING", {"forceInput": True}),
-                "coordinates_negative": ("STRING", {"forceInput": True}),
-                "bboxes": ("BBOX", ),
-                "individual_objects": ("BOOLEAN", {"default": False}),
-                "mask": ("MASK", ),
+                "point_labels": ("STRING", {"forceInput": True}),
+                # "coordinates_negative": ("STRING", {"forceInput": True}),
+                # "bboxes": ("BBOX", ),
+                # "individual_objects": ("BOOLEAN", {"default": False}),
+                # "mask": ("MASK", ),
             },
         }
 
@@ -153,12 +156,13 @@ class Sam2RealtimeSegmentation:
         self,
         images,
         sam2_model,
-        keep_model_loaded,
+        # keep_model_loaded,
         coordinates_positive=None,
-        coordinates_negative=None,
-        bboxes=None,
-        individual_objects=False,
-        mask=None,
+        # coordinates_negative=None,
+        point_labels=None,
+        # bboxes=None,
+        # individual_objects=False,
+        # mask=None,
     ):
         model = sam2_model["model"]
         device = sam2_model["device"]
@@ -179,11 +183,25 @@ class Sam2RealtimeSegmentation:
                 if not self.if_init:
                     self.predictor.load_first_frame(frame)
                     self.if_init = True
-                    obj_id = 1
-                    point = [384, 384]
-                    points = [point]
-                    labels = [1]
-                    _, _, out_mask_logits = self.predictor.add_new_prompt(frame_idx, obj_id, points=points, labels=labels)
+                    # obj_id = 1
+                    # point = [256, 256]
+                    # points = [point]
+                    # labels = [1]
+
+                    coordinates_positive_list = ast.literal_eval(coordinates_positive)
+                    point_labels_list = ast.literal_eval(point_labels)
+                    point_labels_list = list(map(int, point_labels_list))
+
+                    for idx, point in enumerate(coordinates_positive_list):
+                        point_tuple = tuple(map(int, point))
+                        _, _, out_mask_logits = self.predictor.add_new_prompt(
+                            frame_idx=0, 
+                            obj_id=idx + 1, 
+                            points=[point_tuple], 
+                            labels=[point_labels_list[idx]]
+                        )
+
+                    # _, _, _ = self.predictor.add_new_prompt(frame_idx, obj_id, points=points, labels=labels)
                 else:
                     out_obj_ids, out_mask_logits = self.predictor.track(frame)
 
@@ -210,12 +228,8 @@ class Sam2RealtimeSegmentation:
                 constructed_mask = torch.add(frame * 0.1, mask_colored * 0.9).to(device)
                 mask_list.append(constructed_mask)
 
-
-        # Avoid keeping all frames in memory
         for frame_idx, img in enumerate(images):
             process_frame(img, frame_idx)
-            # if frame_idx % 10 == 0:
-            #     torch.cuda.empty_cache()
 
         stacked_masks = torch.stack(mask_list, dim=0)
         stacked_frames = torch.stack(processed_frames, dim=0) 
