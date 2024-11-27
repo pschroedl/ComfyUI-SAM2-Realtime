@@ -7,22 +7,15 @@
 from collections import OrderedDict
 
 import torch
+import numpy as np
 
 from tqdm import tqdm
 
-import sys
-import os
-
-# To import from local sam2
-sys.path.append(os.path.dirname(os.path.abspath(__file__)))
-
-from sam2.modeling.sam2_base import NO_OBJ_SCORE, SAM2Base
-from sam2.utils.misc import concat_points, fill_holes_in_mask_scores, load_video_frames
-import numpy as np
-import cv2
+from sam2_realtime.modeling.sam2_base import NO_OBJ_SCORE, SAM2Base
+from sam2_realtime.utils.misc import concat_points, fill_holes_in_mask_scores, load_video_frames
 
 
-class SAM2CameraPredictor(SAM2Base):
+class SAM2TensorPredictor(SAM2Base):
     """The predictor class to handle user interactions and manage inference states."""
 
     def __init__(

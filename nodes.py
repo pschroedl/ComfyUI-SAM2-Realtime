@@ -5,7 +5,15 @@ import numpy as np
 import logging
 import json
 import ast
-from .sam2.sam2_camera_predictor import SAM2CameraPredictor
+
+import sys
+
+# Add the directory containing 'sam2_realtime' to sys.path
+current_directory = os.path.dirname(os.path.abspath(__file__))
+sam2_realtime_path = os.path.join(current_directory)  # Adjust the relative path
+sys.path.append(sam2_realtime_path)
+print("sys.path:", sys.path)
+from sam2_realtime.sam2_tensor_predictor import SAM2TensorPredictor
 from comfy.utils import load_torch_file
 
 from omegaconf import OmegaConf
@@ -40,7 +48,7 @@ class DownloadAndLoadSAM2RealtimeModel:
     RETURN_TYPES = ("SAM2MODEL",)
     RETURN_NAMES = ("sam2_model",)
     FUNCTION = "loadmodel"
-    CATEGORY = "SAM2-Realtime"
+    CATEGORY = "sam2_realtime"
 
     def loadmodel(self, model, segmentor, device, precision):
         if precision != 'fp32' and device == 'cpu':
@@ -80,7 +88,7 @@ class DownloadAndLoadSAM2RealtimeModel:
             cfg = compose(config_name=model_cfg)
 
             hydra_overrides = [
-                "++model._target_=sam2.sam2_camera_predictor.SAM2CameraPredictor",
+                "++model._target_=sam2_realtime.sam2_tensor_predictor.SAM2TensorPredictor",
             ]
             hydra_overrides_extra = [
                 "++model.sam_mask_decoder_extra_args.dynamic_multimask_via_stability=true",
@@ -146,7 +154,7 @@ class Sam2RealtimeSegmentation:
     RETURN_NAMES = ("PROCESSED_IMAGES","MASK",)
     RETURN_TYPES = ("IMAGE", "IMAGE",)
     FUNCTION = "segment_images"
-    CATEGORY = "SAM2-Realtime"
+    CATEGORY = "sam2_realtime"
 
     def __init__(self):
         self.predictor = None
@@ -240,6 +248,6 @@ NODE_CLASS_MAPPINGS = {
     "Sam2RealtimeSegmentation": Sam2RealtimeSegmentation
 }
 NODE_DISPLAY_NAME_MAPPINGS = {
-    "DownloadAndLoadSAM2RealtimeModel": "(Down)Load SAM2-Realtime Model",
+    "DownloadAndLoadSAM2RealtimeModel": "(Down)Load sam2_realtime Model",
     "Sam2RealtimeSegmentation": "Sam2RealtimeSegmentation"
 }
