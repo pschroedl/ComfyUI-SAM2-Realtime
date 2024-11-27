@@ -12,7 +12,7 @@ import sys
 current_directory = os.path.dirname(os.path.abspath(__file__))
 sam2_realtime_path = os.path.join(current_directory)  # Adjust the relative path
 sys.path.append(sam2_realtime_path)
-print("sys.path:", sys.path)
+
 from sam2_realtime.sam2_tensor_predictor import SAM2TensorPredictor
 from comfy.utils import load_torch_file
 
@@ -48,7 +48,7 @@ class DownloadAndLoadSAM2RealtimeModel:
     RETURN_TYPES = ("SAM2MODEL",)
     RETURN_NAMES = ("sam2_model",)
     FUNCTION = "loadmodel"
-    CATEGORY = "sam2_realtime"
+    CATEGORY = "SAM2-Realtime"
 
     def loadmodel(self, model, segmentor, device, precision):
         if precision != 'fp32' and device == 'cpu':
@@ -154,7 +154,7 @@ class Sam2RealtimeSegmentation:
     RETURN_NAMES = ("PROCESSED_IMAGES","MASK",)
     RETURN_TYPES = ("IMAGE", "IMAGE",)
     FUNCTION = "segment_images"
-    CATEGORY = "sam2_realtime"
+    CATEGORY = "SAM2-Realtime"
 
     def __init__(self):
         self.predictor = None
