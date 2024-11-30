@@ -142,10 +142,10 @@ class Sam2RealtimeSegmentation:
                 "reset_tracking": ("BOOLEAN", {"default": False}),
                 # "keep_model_loaded": ("BOOLEAN", {"default": True}),
             },
-           "optional": {
+            "optional": {
                 "coordinates_positive": ("STRING", ),
-                "point_labels": ("STRING",),
-                # "coordinates_negative": ("STRING", {"forceInput": True}),
+                # "point_labels": ("STRING",),
+                "coordinates_negative": ("STRING", ),
                 # "bboxes": ("BBOX", ),
                 # "individual_objects": ("BOOLEAN", {"default": False}),
                 # "mask": ("MASK", ),
@@ -168,14 +168,14 @@ class Sam2RealtimeSegmentation:
         # keep_model_loaded,
         reset_tracking,
         coordinates_positive=None,
-        # coordinates_negative=None,
-        point_labels=None,
+        coordinates_negative=None,
+        #point_labels=None,
         # bboxes=None,
         # individual_objects=False,
         # mask=None,
     ):
         model = sam2_model["model"]
-        device = sam2_model["device"]
+        #device = sam2_model["device"]
 
         device = torch.device("cuda")
         model.to(device)
@@ -190,58 +190,62 @@ class Sam2RealtimeSegmentation:
             self.predictor = None
 
         if self.predictor is None:
-            self.predictor = model   
+            self.predictor = model
 
         def process_frame(frame, frame_idx):
-            with torch.inference_mode(), torch.autocast("cuda", dtype=torch.float16):
-                frame = frame.to(device).float()  # Keep everything in torch
+            def process_coordinate_input(coordinates, label):
+                if not coordinates:
+                    return [], []
+                coord_list = ast.literal_eval(coordinates)
+                points = [tuple(map(int, point)) for point in coord_list]
+                labels = [label] * len(points)
+                return points, labels
 
-                if not self.if_init:
-                    self.predictor.load_first_frame(frame)
-                    self.if_init = True
-                    # obj_id = 1
-                    # point = [256, 256]
-                    # points = [point]
-                    # labels = [1]
-
-                    print(f"Debug - Raw coordinates_positive: {coordinates_positive}")
-                    print(f"Debug - Raw point_labels: {point_labels}")
-                    
-                    coordinates_positive_list = ast.literal_eval(coordinates_positive)
-                    point_labels_list = ast.literal_eval(point_labels)
-                    point_labels_list = list(map(int, point_labels_list))
-
-                    print(f"Debug - Parsed coordinates_positive_list: {coordinates_positive_list}")
-                    print(f"Debug - Parsed point_labels_list: {point_labels_list}")
-
-                    for idx, point in enumerate(coordinates_positive_list):
-                        point_tuple = tuple(map(int, point))
-                        print(f"Debug - Processing point {idx}: {point_tuple} with label {point_labels_list[idx]}")
-                        _, _, out_mask_logits = self.predictor.add_new_prompt(
-                            frame_idx=0, 
-                            obj_id=idx + 1, 
-                            points=[point_tuple], 
-                            labels=[point_labels_list[idx]]
-                        )
-                        print(f"Debug - Mask logits shape after point {idx}: {out_mask_logits.shape}")
-
-                    # _, _, _ = self.predictor.add_new_prompt(frame_idx, obj_id, points=points, labels=labels)
-                else:
-                    print(f"Debug - Tracking frame {frame_idx}")
-                    out_obj_ids, out_mask_logits = self.predictor.track(frame)
-                    print(f"Debug - Tracking results - Object IDs: {out_obj_ids}, Mask logits shape: {out_mask_logits.shape}")
-
+            def process_mask_logits(out_mask_logits, frame_shape):
                 if out_mask_logits.shape[0] > 0:
-                    # Ensure out_mask_logits is on the same device
                     out_mask_logits = out_mask_logits.to(device)
                     mask = (out_mask_logits[0, 0] > 0.5).byte()
                     mask = torch.nn.functional.interpolate(
                         mask.unsqueeze(0).unsqueeze(0).float(), 
-                        size=(frame.shape[0], frame.shape[1]), 
+                        size=(frame_shape[0], frame_shape[1]), 
                         mode='nearest'
-                    ).squeeze(0).squeeze(0).byte().to(device)  # Move the interpolated mask to the correct device
+                    ).squeeze(0).squeeze(0).byte().to(device)
                 else:
-                    mask = torch.ones((frame.shape[0], frame.shape[1]), device=device, dtype=torch.uint8)
+                    mask = torch.ones((frame_shape[0], frame_shape[1]), device=device, dtype=torch.uint8)
+                return mask
+
+            with torch.inference_mode(), torch.autocast("cuda", dtype=torch.float16):
+                frame = frame.to(device).float()
+
+                if not self.if_init:
+                    self.predictor.load_first_frame(frame)
+                    self.if_init = True
+
+                    # Process both coordinate lists
+                    pos_points, pos_labels = process_coordinate_input(coordinates_positive, 1)
+                    neg_points, neg_labels = process_coordinate_input(coordinates_negative, 0)
+
+                    # Combine points and labels
+                    all_points = pos_points + neg_points
+                    all_labels = pos_labels + neg_labels
+
+                    if all_points:
+                        points_tensor = torch.tensor([all_points], device=device)
+                        labels_tensor = torch.tensor([all_labels], device=device)
+                        
+                        #NOTE: single object tracking only for now. TODO switch coordinate input to dict to track multiple objects  
+                        _, _, out_mask_logits = self.predictor.add_new_prompt(
+                            frame_idx=0,
+                            obj_id=1,
+                            points=points_tensor,
+                            labels=labels_tensor,
+                        )
+                    else:
+                        out_mask_logits = torch.zeros((0,), device=device)
+                else:
+                    out_obj_ids, out_mask_logits = self.predictor.track(frame)
+                # Process mask logits
+                mask = process_mask_logits(out_mask_logits, frame.shape)
 
                 # Create colored overlay for processed frames
                 mask_colored = torch.stack([mask] * 3, dim=2).to(device)
@@ -254,15 +258,16 @@ class Sam2RealtimeSegmentation:
         for frame_idx, img in enumerate(images):
             process_frame(img, frame_idx)
 
-        # Stack masks as BHW tensor
+        # Stack masks and frames
         stacked_masks = torch.stack(mask_list, dim=0)
-        stacked_frames = torch.stack(processed_frames, dim=0) 
+        stacked_frames = torch.stack(processed_frames, dim=0)
         return (stacked_frames, stacked_masks)
 
 NODE_CLASS_MAPPINGS = {
     "DownloadAndLoadSAM2RealtimeModel": DownloadAndLoadSAM2RealtimeModel,
     "Sam2RealtimeSegmentation": Sam2RealtimeSegmentation
 }
+
 NODE_DISPLAY_NAME_MAPPINGS = {
     "DownloadAndLoadSAM2RealtimeModel": "(Down)Load sam2_realtime Model",
     "Sam2RealtimeSegmentation": "Sam2RealtimeSegmentation"
