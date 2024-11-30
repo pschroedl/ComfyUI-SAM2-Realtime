@@ -152,7 +152,7 @@ class Sam2RealtimeSegmentation:
         }
 
     RETURN_NAMES = ("PROCESSED_IMAGES","MASK",)
-    RETURN_TYPES = ("IMAGE", "IMAGE",)
+    RETURN_TYPES = ("IMAGE", "MASK",)
     FUNCTION = "segment_images"
     CATEGORY = "SAM2-Realtime"
 
@@ -225,20 +225,18 @@ class Sam2RealtimeSegmentation:
                 else:
                     mask = torch.ones((frame.shape[0], frame.shape[1]), device=device, dtype=torch.uint8)
 
-                # Ensure frame is on the same device
-                frame = frame.to(device)
-
-                mask_colored = torch.stack([mask] * 3, dim=2).to(device)  # Create 3-channel mask and move to device
-
+                # Create colored overlay for processed frames
+                mask_colored = torch.stack([mask] * 3, dim=2).to(device)
                 overlayed_frame = torch.add(frame * 0.7, mask_colored * 0.3).to(device)
                 processed_frames.append(overlayed_frame)
 
-                constructed_mask = torch.add(frame * 0.1, mask_colored * 0.9).to(device)
-                mask_list.append(constructed_mask)
+                # Store the raw binary mask for mask output
+                mask_list.append(mask)
 
         for frame_idx, img in enumerate(images):
             process_frame(img, frame_idx)
 
+        # Stack masks as BHW tensor
         stacked_masks = torch.stack(mask_list, dim=0)
         stacked_frames = torch.stack(processed_frames, dim=0) 
         return (stacked_frames, stacked_masks)
