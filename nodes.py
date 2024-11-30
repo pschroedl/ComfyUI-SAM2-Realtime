@@ -139,11 +139,12 @@ class Sam2RealtimeSegmentation:
             "required": {
                 "images": ("IMAGE",),
                 "sam2_model": ("SAM2MODEL",),
+                "reset_tracking": ("BOOLEAN", {"default": False}),
                 # "keep_model_loaded": ("BOOLEAN", {"default": True}),
             },
            "optional": {
-                "coordinates_positive": ("STRING", {"forceInput": True}),
-                "point_labels": ("STRING", {"forceInput": True}),
+                "coordinates_positive": ("STRING", ),
+                "point_labels": ("STRING",),
                 # "coordinates_negative": ("STRING", {"forceInput": True}),
                 # "bboxes": ("BBOX", ),
                 # "individual_objects": ("BOOLEAN", {"default": False}),
@@ -165,6 +166,7 @@ class Sam2RealtimeSegmentation:
         images,
         sam2_model,
         # keep_model_loaded,
+        reset_tracking,
         coordinates_positive=None,
         # coordinates_negative=None,
         point_labels=None,
@@ -181,6 +183,12 @@ class Sam2RealtimeSegmentation:
         processed_frames = []
         mask_list = []
         # The `model` variable is now ready and equivalent to `predictor` returned by sam2.build_sam.build_sam2_camera_predictor
+        
+        
+        if reset_tracking:
+            self.if_init = False
+            self.predictor = None
+
         if self.predictor is None:
             self.predictor = model   
 
@@ -196,22 +204,32 @@ class Sam2RealtimeSegmentation:
                     # points = [point]
                     # labels = [1]
 
+                    print(f"Debug - Raw coordinates_positive: {coordinates_positive}")
+                    print(f"Debug - Raw point_labels: {point_labels}")
+                    
                     coordinates_positive_list = ast.literal_eval(coordinates_positive)
                     point_labels_list = ast.literal_eval(point_labels)
                     point_labels_list = list(map(int, point_labels_list))
 
+                    print(f"Debug - Parsed coordinates_positive_list: {coordinates_positive_list}")
+                    print(f"Debug - Parsed point_labels_list: {point_labels_list}")
+
                     for idx, point in enumerate(coordinates_positive_list):
                         point_tuple = tuple(map(int, point))
+                        print(f"Debug - Processing point {idx}: {point_tuple} with label {point_labels_list[idx]}")
                         _, _, out_mask_logits = self.predictor.add_new_prompt(
                             frame_idx=0, 
                             obj_id=idx + 1, 
                             points=[point_tuple], 
                             labels=[point_labels_list[idx]]
                         )
+                        print(f"Debug - Mask logits shape after point {idx}: {out_mask_logits.shape}")
 
                     # _, _, _ = self.predictor.add_new_prompt(frame_idx, obj_id, points=points, labels=labels)
                 else:
+                    print(f"Debug - Tracking frame {frame_idx}")
                     out_obj_ids, out_mask_logits = self.predictor.track(frame)
+                    print(f"Debug - Tracking results - Object IDs: {out_obj_ids}, Mask logits shape: {out_mask_logits.shape}")
 
                 if out_mask_logits.shape[0] > 0:
                     # Ensure out_mask_logits is on the same device
