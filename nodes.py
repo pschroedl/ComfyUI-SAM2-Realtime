@@ -144,7 +144,6 @@ class Sam2RealtimeSegmentation:
             },
             "optional": {
                 "coordinates_positive": ("STRING", ),
-                # "point_labels": ("STRING",),
                 "coordinates_negative": ("STRING", ),
                 # "bboxes": ("BBOX", ),
                 # "individual_objects": ("BOOLEAN", {"default": False}),
@@ -152,7 +151,7 @@ class Sam2RealtimeSegmentation:
             },
         }
 
-    RETURN_NAMES = ("PROCESSED_IMAGES","MASK",)
+    RETURN_NAMES = ("PROCESSED_IMAGES", "MASK",)
     RETURN_TYPES = ("IMAGE", "MASK",)
     FUNCTION = "segment_images"
     CATEGORY = "SAM2-Realtime"
@@ -160,6 +159,32 @@ class Sam2RealtimeSegmentation:
     def __init__(self):
         self.predictor = None
         self.if_init = False
+
+    def _process_coordinate_input(self, coordinates, label):
+        """Helper function to process coordinate inputs safely"""
+        if not coordinates:
+            return [], []
+        try:
+            coord_list = ast.literal_eval(coordinates)
+            points = [tuple(map(int, point)) for point in coord_list]
+            labels = [label] * len(points)
+            return points, labels
+        except (ValueError, SyntaxError) as e:
+            print(f"Error processing coordinates: {e}")
+            return [], []
+
+    def _process_mask_logits(self, out_mask_logits, frame_shape, device):
+        """Helper function to process mask logits"""
+        if out_mask_logits.shape[0] > 0:
+            mask = (out_mask_logits[0, 0] > 0.5).byte()
+            mask = torch.nn.functional.interpolate(
+                mask.unsqueeze(0).unsqueeze(0).float(), 
+                size=frame_shape[:2],
+                mode='nearest'
+            ).squeeze().byte().to(device)
+        else:
+            mask = torch.ones(frame_shape[:2], device=device, dtype=torch.uint8)
+        return mask
 
     def segment_images(
         self,
@@ -175,15 +200,12 @@ class Sam2RealtimeSegmentation:
         # mask=None,
     ):
         model = sam2_model["model"]
-        #device = sam2_model["device"]
-
         device = torch.device("cuda")
         model.to(device)
 
         processed_frames = []
         mask_list = []
         # The `model` variable is now ready and equivalent to `predictor` returned by sam2.build_sam.build_sam2_camera_predictor
-        
         
         if reset_tracking:
             self.if_init = False
@@ -192,48 +214,25 @@ class Sam2RealtimeSegmentation:
         if self.predictor is None:
             self.predictor = model
 
-        def process_frame(frame, frame_idx):
-            def process_coordinate_input(coordinates, label):
-                if not coordinates:
-                    return [], []
-                coord_list = ast.literal_eval(coordinates)
-                points = [tuple(map(int, point)) for point in coord_list]
-                labels = [label] * len(points)
-                return points, labels
+        # Process coordinates once, outside the frame loop
+        pos_points, pos_labels = self._process_coordinate_input(coordinates_positive, 1)
+        neg_points, neg_labels = self._process_coordinate_input(coordinates_negative, 0)
+        all_points = pos_points + neg_points
+        all_labels = pos_labels + neg_labels
 
-            def process_mask_logits(out_mask_logits, frame_shape):
-                if out_mask_logits.shape[0] > 0:
-                    out_mask_logits = out_mask_logits.to(device)
-                    mask = (out_mask_logits[0, 0] > 0.5).byte()
-                    mask = torch.nn.functional.interpolate(
-                        mask.unsqueeze(0).unsqueeze(0).float(), 
-                        size=(frame_shape[0], frame_shape[1]), 
-                        mode='nearest'
-                    ).squeeze(0).squeeze(0).byte().to(device)
-                else:
-                    mask = torch.ones((frame_shape[0], frame_shape[1]), device=device, dtype=torch.uint8)
-                return mask
+        if all_points:
+            points_tensor = torch.tensor([all_points], device=device)
+            labels_tensor = torch.tensor([all_labels], device=device)
 
-            with torch.inference_mode(), torch.autocast("cuda", dtype=torch.float16):
+        with torch.inference_mode(), torch.autocast("cuda", dtype=torch.float16):
+            for frame_idx, frame in enumerate(images):
                 frame = frame.to(device).float()
 
                 if not self.if_init:
                     self.predictor.load_first_frame(frame)
                     self.if_init = True
 
-                    # Process both coordinate lists
-                    pos_points, pos_labels = process_coordinate_input(coordinates_positive, 1)
-                    neg_points, neg_labels = process_coordinate_input(coordinates_negative, 0)
-
-                    # Combine points and labels
-                    all_points = pos_points + neg_points
-                    all_labels = pos_labels + neg_labels
-
                     if all_points:
-                        points_tensor = torch.tensor([all_points], device=device)
-                        labels_tensor = torch.tensor([all_labels], device=device)
-                        
-                        #NOTE: single object tracking only for now. TODO switch coordinate input to dict to track multiple objects  
                         _, _, out_mask_logits = self.predictor.add_new_prompt(
                             frame_idx=0,
                             obj_id=1,
@@ -244,23 +243,21 @@ class Sam2RealtimeSegmentation:
                         out_mask_logits = torch.zeros((0,), device=device)
                 else:
                     out_obj_ids, out_mask_logits = self.predictor.track(frame)
+
                 # Process mask logits
-                mask = process_mask_logits(out_mask_logits, frame.shape)
+                mask = self._process_mask_logits(out_mask_logits, frame.shape, device)
 
                 # Create colored overlay for processed frames
-                mask_colored = torch.stack([mask] * 3, dim=2).to(device)
-                overlayed_frame = torch.add(frame * 0.7, mask_colored * 0.3).to(device)
+                mask_colored = torch.stack([mask] * 3, dim=2)
+                overlayed_frame = torch.add(frame * 0.7, mask_colored * 0.3)
+                
                 processed_frames.append(overlayed_frame)
-
-                # Store the raw binary mask for mask output
                 mask_list.append(mask)
-
-        for frame_idx, img in enumerate(images):
-            process_frame(img, frame_idx)
 
         # Stack masks and frames
         stacked_masks = torch.stack(mask_list, dim=0)
         stacked_frames = torch.stack(processed_frames, dim=0)
+        
         return (stacked_frames, stacked_masks)
 
 NODE_CLASS_MAPPINGS = {
