@@ -261,12 +261,44 @@ class Sam2RealtimeSegmentation:
         
         return (stacked_frames, stacked_masks)
 
+class BoundingBoxToCenter:
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {
+            "required": {
+                "bbox_data": ("STRING", {"default": "[[[0, 0, 100, 100]]]"}),
+            }
+        }
+
+    RETURN_TYPES = ("STRING",)
+    RETURN_NAMES = ("center_coordinates",)
+    FUNCTION = "convert_bbox_to_center"
+    CATEGORY = "SAM2-Realtime"
+
+    def convert_bbox_to_center(self, bbox_data):
+        try:
+            bbox_list = ast.literal_eval(bbox_data)
+            tlx, tly, brx, bry = bbox_list[0][0]
+        
+            center_x = int((tlx + brx) / 2)
+            center_y = int((tly + bry) / 2)
+        
+            center_coords = f"[[{center_x}, {center_y}]]"
+            
+            return (center_coords,)
+            
+        except (ValueError, SyntaxError, IndexError) as e:
+            print(f"Error processing bounding box data: {e}")
+            return ("[[0, 0]]",)
+
 NODE_CLASS_MAPPINGS = {
     "DownloadAndLoadSAM2RealtimeModel": DownloadAndLoadSAM2RealtimeModel,
-    "Sam2RealtimeSegmentation": Sam2RealtimeSegmentation
+    "Sam2RealtimeSegmentation": Sam2RealtimeSegmentation,
+    "BoundingBoxToCenter": BoundingBoxToCenter
 }
 
 NODE_DISPLAY_NAME_MAPPINGS = {
     "DownloadAndLoadSAM2RealtimeModel": "(Down)Load sam2_realtime Model",
-    "Sam2RealtimeSegmentation": "Sam2RealtimeSegmentation"
+    "Sam2RealtimeSegmentation": "Sam2RealtimeSegmentation",
+    "BoundingBoxToCenter": "BoundingBox To Center"
 }
