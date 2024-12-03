@@ -64,12 +64,13 @@ class DownloadAndLoadSAM2RealtimeModel:
 
         download_path = os.path.join(folder_paths.models_dir, "sam2")
         model_path = os.path.join(download_path, model)
-        print("model_path: ", model_path)
 
-        url = "https://dl.fbaipublicfiles.com/segment_anything_2/072824/sam2_hiera_tiny.pt"
+        if not os.path.exists(download_path):
+            os.makedirs(download_path)
 
         if not os.path.exists(model_path):
             print(f"Downloading SAM2 model to: {model_path}")
+            url = "https://dl.fbaipublicfiles.com/segment_anything_2/072824/sam2_hiera_tiny.pt"
             response = requests.get(url, stream=True)
             response.raise_for_status()
 

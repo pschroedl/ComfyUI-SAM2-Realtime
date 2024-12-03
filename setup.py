@@ -28,7 +28,7 @@ REQUIRED_PACKAGES = [
 ]
 
 def get_extensions():
-    srcs = ["sam2/csrc/connected_components.cu"]
+    srcs = ["sam2_realtime/csrc/connected_components.cu"]
     compile_args = {
         "cxx": [],
         "nvcc": [
@@ -38,7 +38,7 @@ def get_extensions():
             "-D__CUDA_NO_HALF2_OPERATORS__",
         ],
     }
-    ext_modules = [CUDAExtension("sam2._C", srcs, extra_compile_args=compile_args)]
+    ext_modules = [CUDAExtension("sam2_realtime._C", srcs, extra_compile_args=compile_args)]
     return ext_modules
 
 
