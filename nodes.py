@@ -266,7 +266,7 @@ class BoundingBoxToCenter:
     def INPUT_TYPES(cls):
         return {
             "required": {
-                "bbox_data": ("STRING", {"default": "[[[0, 0, 100, 100]]]"}),
+                "bbox_data": ("JSON",),
             }
         }
 
