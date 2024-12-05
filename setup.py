@@ -53,7 +53,7 @@ setup(
     license=LICENSE,
     packages=find_packages(),
     install_requires=REQUIRED_PACKAGES,
-    python_requires=">=3.11.10",
+    python_requires=">=3.10",
     ext_modules=get_extensions(),
     cmdclass={"build_ext": BuildExtension.with_options(no_python_abi_suffix=True)},
 )
