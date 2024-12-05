@@ -4,6 +4,10 @@
 # This source code is licensed under the license found in the
 # LICENSE file in the root directory of this source tree.
 
+import os
+# Set the CUDA architecture list
+os.environ["TORCH_CUDA_ARCH_LIST"] = "8.0 8.6+PTX 8.7 9.0 9.0a"
+
 from setuptools import find_packages, setup
 from torch.utils.cpp_extension import BuildExtension, CUDAExtension
 
@@ -53,7 +57,7 @@ setup(
     license=LICENSE,
     packages=find_packages(),
     install_requires=REQUIRED_PACKAGES,
-    python_requires=">=3.11.10",
+    python_requires=">=3.10.15",
     ext_modules=get_extensions(),
     cmdclass={"build_ext": BuildExtension.with_options(no_python_abi_suffix=True)},
 )
