@@ -140,12 +140,12 @@ class Sam2RealtimeSegmentation:
             "required": {
                 "images": ("IMAGE",),
                 "sam2_model": ("SAM2MODEL",),
-                "reset_tracking": ("BOOLEAN", {"default": False}),
                 # "keep_model_loaded": ("BOOLEAN", {"default": True}),
             },
             "optional": {
                 "coordinates_positive": ("STRING", ),
                 "coordinates_negative": ("STRING", ),
+                "reset_tracking": ("BOOLEAN", {"default": False}),
                 # "bboxes": ("BBOX", ),
                 # "individual_objects": ("BOOLEAN", {"default": False}),
                 # "mask": ("MASK", ),
@@ -192,9 +192,9 @@ class Sam2RealtimeSegmentation:
         images,
         sam2_model,
         # keep_model_loaded,
-        reset_tracking,
         coordinates_positive=None,
         coordinates_negative=None,
+        reset_tracking=False,
         #point_labels=None,
         # bboxes=None,
         # individual_objects=False,
@@ -250,6 +250,7 @@ class Sam2RealtimeSegmentation:
 
                 # Create colored overlay for processed frames
                 mask_colored = torch.stack([mask] * 3, dim=2)
+
                 overlayed_frame = torch.add(frame * 0.7, mask_colored * 0.3)
                 
                 processed_frames.append(overlayed_frame)
