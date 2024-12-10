@@ -14,8 +14,6 @@ from tqdm import tqdm
 from sam2_realtime.modeling.sam2_base import NO_OBJ_SCORE, SAM2Base
 from sam2_realtime.utils.misc import concat_points, fill_holes_in_mask_scores, load_video_frames
 
-from sam2_realtime.utils.transforms import SAM2Transforms
-
 class SAM2TensorPredictor(SAM2Base):
     """The predictor class to handle user interactions and manage inference states."""
 
