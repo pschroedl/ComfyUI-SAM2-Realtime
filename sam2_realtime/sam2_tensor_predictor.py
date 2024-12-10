@@ -14,6 +14,7 @@ from tqdm import tqdm
 from sam2_realtime.modeling.sam2_base import NO_OBJ_SCORE, SAM2Base
 from sam2_realtime.utils.misc import concat_points, fill_holes_in_mask_scores, load_video_frames
 
+from sam2_realtime.utils.transforms import SAM2Transforms
 
 class SAM2TensorPredictor(SAM2Base):
     """The predictor class to handle user interactions and manage inference states."""
@@ -55,7 +56,9 @@ class SAM2TensorPredictor(SAM2Base):
             img = img.float()
         else:
             raise ValueError("Input must be a numpy array or a PyTorch tensor")
-
+        #save original height/width
+        orig_h, orig_w = img.shape[1:]
+        
         # Resize to the target size (supports tensor resizing)
         img = torch.nn.functional.interpolate(
             img.unsqueeze(0), size=(image_size, image_size), mode="bilinear", align_corners=False
@@ -68,28 +71,29 @@ class SAM2TensorPredictor(SAM2Base):
         img /= img_std
 
         height, width = img.shape[1:]  # CHW format
-        return img, width, height
+        return img, width, height, orig_w, orig_h
 
     @torch.inference_mode()
     def load_first_frame(self, img):
         if isinstance(img, torch.Tensor):
             img = img.to(self.device)  # Ensure the tensor is on the correct device
-
+            
         self.condition_state = self._init_state(
             offload_video_to_cpu=False, offload_state_to_cpu=False
         )
-        img, width, height = self.prepare_data(img, image_size=self.image_size)
+        img, width, height, orig_w, orig_h = self.prepare_data(img, image_size=self.image_size)
+        self._orig_hw = (orig_w, orig_h)
         self.condition_state["images"] = [img]
         self.condition_state["num_frames"] = len(self.condition_state["images"])
         self.condition_state["video_height"] = height
         self.condition_state["video_width"] = width
         self._get_image_feature(frame_idx=0, batch_size=1)
-
+    
     def add_conditioning_frame(self, img):
         if isinstance(img, torch.Tensor):
             img = img.to(self.device)  # Ensure the tensor is on the correct device
 
-        img, width, height = self.prepare_data(img, image_size=self.image_size)
+        img, width, height, _, _ = self.prepare_data(img, image_size=self.image_size)
         self.condition_state["images"].append(img)
         self.condition_state["num_frames"] = len(self.condition_state["images"])
         self._get_image_feature(
@@ -235,14 +239,15 @@ class SAM2TensorPredictor(SAM2Base):
                     points = torch.cat([box_coords, points], dim=1)
                     labels = torch.cat([box_labels, labels], dim=1)
         if normalize_coords:
-            video_H = self.condition_state["video_height"]
-            video_W = self.condition_state["video_width"]
-            points = points / torch.tensor([video_W, video_H]).to(points.device)
+            #video_H = self.condition_state["video_height"]
+            #video_W = self.condition_state["video_width"]
+            orig_w, orig_h = self._orig_hw
+            
+            points = points / torch.tensor([orig_w, orig_h]).to(points.device)
         # scale the (normalized) coordinates by the model's internal image size
         points = points * self.image_size
         points = points.to(self.condition_state["device"])
         labels = labels.to(self.condition_state["device"])
-
         if not clear_old_points:
             point_inputs = point_inputs_per_frame.get(frame_idx, None)
         else:
@@ -342,14 +347,16 @@ class SAM2TensorPredictor(SAM2Base):
         if labels.dim() == 1:
             labels = labels.unsqueeze(0)  # add batch dimension
         if normalize_coords:
-            video_H = self.condition_state["video_height"]
-            video_W = self.condition_state["video_width"]
-            points = points / torch.tensor([video_W, video_H]).to(points.device)
+            #video_H = self.condition_state["video_height"]
+            #video_W = self.condition_state["video_width"]
+            orig_w, orig_h = self._orig_hw
+            
+            points = points / torch.tensor([orig_w, orig_h]).to(points.device)
+            
         # scale the (normalized) coordinates by the model's internal image size
         points = points * self.image_size
         points = points.to(self.condition_state["device"])
         labels = labels.to(self.condition_state["device"])
-
         if not clear_old_points:
             point_inputs = point_inputs_per_frame.get(frame_idx, None)
         else:
@@ -769,7 +776,7 @@ class SAM2TensorPredictor(SAM2Base):
         if isinstance(img, torch.Tensor):
             img = img.to(self.device)  # Ensure the tensor is on the correct device
 
-        img, _, _ = self.prepare_data(img, image_size=self.image_size)
+        img, _, _ , _, _ = self.prepare_data(img, image_size=self.image_size)
 
         output_dict = self.condition_state["output_dict"]
         obj_ids = self.condition_state["obj_ids"]
