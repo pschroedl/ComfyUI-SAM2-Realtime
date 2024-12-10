@@ -31,7 +31,7 @@ class DownloadAndLoadSAM2RealtimeModel:
     def INPUT_TYPES(s):
         return {"required": {
             "model": ([ 
-                    'sam2_hiera_tiny.pt',
+                    'sam2_hiera_tiny.pt', 'sam2_hiera_small.pt',
                     ],),
             "segmentor": (
                     ['realtime'],
@@ -70,7 +70,8 @@ class DownloadAndLoadSAM2RealtimeModel:
 
         if not os.path.exists(model_path):
             print(f"Downloading SAM2 model to: {model_path}")
-            url = "https://dl.fbaipublicfiles.com/segment_anything_2/072824/sam2_hiera_tiny.pt"
+            base_url = "https://dl.fbaipublicfiles.com/segment_anything_2/072824/"
+            url = f"{base_url}{model}"
             response = requests.get(url, stream=True)
             response.raise_for_status()
 
@@ -83,8 +84,9 @@ class DownloadAndLoadSAM2RealtimeModel:
 
         config_dir = os.path.join(script_directory, "sam2_configs") 
 
+        model_cfg = model.replace(".pt", ".yaml")
+
         # Code ripped out of sam2.build_sam.build_sam2_camera_predictor to appease Hydra
-        model_cfg = "sam2_hiera_t.yaml" #TODO: remove hardcoded config and path
         with initialize_config_dir(config_dir=config_dir, version_base=None):
             cfg = compose(config_name=model_cfg)
 
