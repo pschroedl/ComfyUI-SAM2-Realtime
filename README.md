@@ -1,5 +1,4 @@
 ## Install ComfyUI-SAM2-Realtime
-Clone the repo
 ```
 cd custom_nodes
 git clone https://github.com/pschroedl/ComfyUI-SAM2-Realtime.git
