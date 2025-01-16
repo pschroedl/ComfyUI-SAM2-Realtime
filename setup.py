@@ -36,6 +36,7 @@ def get_extensions():
     compile_args = {
         "cxx": [],
         "nvcc": [
+            "--compiler-bindir=/usr/bin/gcc-12",
             "-DCUDA_HAS_FP16=1",
             "-D__CUDA_NO_HALF_OPERATORS__",
             "-D__CUDA_NO_HALF_CONVERSIONS__",

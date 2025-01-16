@@ -1,12 +1,17 @@
+#nodes.py
+
 import torch
 import os
 import requests
-import numpy as np
 import logging
-import json
 import ast
-
 import sys
+
+import numpy as np #ugh
+import cv2 #double ugh
+
+import pycuda.driver as cuda
+import pycuda.autoinit  # Automatically initializes a CUDA context
 
 # Add the directory containing 'sam2_realtime' to sys.path
 current_directory = os.path.dirname(os.path.abspath(__file__))
@@ -14,7 +19,7 @@ sam2_realtime_path = os.path.join(current_directory)  # Adjust the relative path
 sys.path.append(sam2_realtime_path)
 
 from sam2_realtime.sam2_tensor_predictor import SAM2TensorPredictor
-from comfy.utils import load_torch_file
+from sam2_realtime.sam2_tensorrt_predictor import Sam2TensorrtPredictor
 
 from omegaconf import OmegaConf
 from hydra.utils import instantiate
@@ -141,13 +146,13 @@ class Sam2RealtimeSegmentation:
         return {
             "required": {
                 "images": ("IMAGE",),
-                "sam2_model": ("SAM2MODEL",),
+                # "sam2_model": ("SAM2MODEL",),
                 # "keep_model_loaded": ("BOOLEAN", {"default": True}),
             },
             "optional": {
-                "coordinates_positive": ("STRING", ),
-                "coordinates_negative": ("STRING", ),
-                "reset_tracking": ("BOOLEAN", {"default": False}),
+                # "coordinates_positive": ("STRING", ),
+                # "coordinates_negative": ("STRING", ),
+                # "reset_tracking": ("BOOLEAN", {"default": False}),
                 # "bboxes": ("BBOX", ),
                 # "individual_objects": ("BOOLEAN", {"default": False}),
                 # "mask": ("MASK", ),
@@ -160,7 +165,26 @@ class Sam2RealtimeSegmentation:
     CATEGORY = "SAM2-Realtime"
 
     def __init__(self):
-        self.predictor = None
+        ##############################################################################
+        # SETUP: Load Engines, Create Contexts, Allocate Buffers
+        ##############################################################################
+        self.device = torch.device("cuda")
+        
+        cuda.init()
+        device = cuda.Device(0)
+        context = device.make_context()
+        print(f"Using device: {device.name()}")
+
+        # Allocate memory
+        mem = cuda.mem_alloc(1024)
+        print(f"Memory allocated at: {mem}")
+        # context.pop()
+
+        tensor_models_path = os.path.join(folder_paths.models_dir, "tensorrt")
+        self.predictor = Sam2TensorrtPredictor(
+            encoder_engine_path=os.path.join(tensor_models_path, "sam2_hiera_tiny.encoder.engine"),
+            decoder_engine_path=os.path.join(tensor_models_path, "sam2_hiera_tiny.decoder.engine")
+        )
         self.if_init = False
 
     def _process_coordinate_input(self, coordinates, label):
@@ -192,71 +216,60 @@ class Sam2RealtimeSegmentation:
     def segment_images(
         self,
         images,
-        sam2_model,
-        # keep_model_loaded,
-        coordinates_positive=None,
-        coordinates_negative=None,
-        reset_tracking=False,
-        #point_labels=None,
-        # bboxes=None,
-        # individual_objects=False,
-        # mask=None,
+        # sam2_model,
+        # coordinates_positive=None,
+        # coordinates_negative=None,
+        # reset_tracking=False,
     ):
-        model = sam2_model["model"]
-        device = torch.device("cuda")
-        model.to(device)
+        
 
         processed_frames = []
         mask_list = []
-        # The `model` variable is now ready and equivalent to `predictor` returned by sam2.build_sam.build_sam2_camera_predictor
         
-        if reset_tracking:
-            self.if_init = False
-            self.predictor = None
-
-        if self.predictor is None:
-            self.predictor = model
-
-        # Process coordinates once, outside the frame loop
-        pos_points, pos_labels = self._process_coordinate_input(coordinates_positive, 1)
-        neg_points, neg_labels = self._process_coordinate_input(coordinates_negative, 0)
-        all_points = pos_points + neg_points
-        all_labels = pos_labels + neg_labels
-
-        if all_points:
-            points_tensor = torch.tensor([all_points], device=device)
-            labels_tensor = torch.tensor([all_labels], device=device)
+        # if reset_tracking:
+        #     self.if_init = False
 
         with torch.inference_mode(), torch.autocast("cuda", dtype=torch.float16):
             for frame_idx, frame in enumerate(images):
-                frame = frame.to(device).float()
+                
+                # Tensor -> numpy array
+                frame_numpy = frame.numpy()  # shape: already (H,W,C)!!
+
+                # Convert from RGB -> BGR
+                frame_bgr = cv2.cvtColor(frame_numpy, cv2.COLOR_RGB2BGR)  # shape: (H,W,3), float32 in [0..1]
+
+                # Scale to [0..255] and cast to uint8
+                frame_bgr = (frame_bgr * 255).clip(0,255).astype(np.uint8)
 
                 if not self.if_init:
-                    self.predictor.load_first_frame(frame)
                     self.if_init = True
 
-                    if all_points:
-                        _, _, out_mask_logits = self.predictor.add_new_prompt(
-                            frame_idx=0,
-                            obj_id=1,
-                            points=points_tensor,
-                            labels=labels_tensor,
-                        )
-                    else:
-                        out_mask_logits = torch.zeros((0,), device=device)
+                    out_mask_logits = self.predictor.load_first_frame_and_prompt(
+                        frame_bgr,
+                        point_coord=(512, 512)
+                    )
                 else:
-                    out_obj_ids, out_mask_logits = self.predictor.track(frame)
+                    out_mask_logits = self.predictor.track(frame_bgr)
 
                 # Process mask logits
-                mask = self._process_mask_logits(out_mask_logits, frame.shape, device)
+                # mask = self._process_mask_logits(out_mask_logits, frame.shape, self.device)
+                mask = out_mask_logits
 
-                # Create colored overlay for processed frames
-                mask_colored = torch.stack([mask] * 3, dim=2)
+                # # Create colored overlay for processed frames
+                # mask_colored = torch.stack([mask] * 3, dim=2)
 
-                overlayed_frame = torch.add(frame * 0.7, mask_colored * 0.3)
+                # overlayed_frame = torch.add(frame * 0.7, mask_colored * 0.3)
                 
-                processed_frames.append(overlayed_frame)
-                mask_list.append(mask)
+                # Create colored overlay for processed frames
+                mask_colored = np.stack([mask] * 3, axis=2)  # Stack along the last dimension (HxWxC format)
+
+                mask_colored_resized = cv2.resize(mask_colored, (frame.shape[1], frame.shape[0]))
+
+                # Overlay the frame and the colored mask
+                overlaid_frame = frame * 0.7 + mask_colored_resized * 0.3
+
+                processed_frames.append(torch.tensor(overlaid_frame))
+                mask_list.append(torch.tensor(mask))
 
         # Stack masks and frames
         stacked_masks = torch.stack(mask_list, dim=0)
@@ -264,12 +277,63 @@ class Sam2RealtimeSegmentation:
         
         return (stacked_frames, stacked_masks)
 
+
+
+
+class Sam2RealtimeSegmentationTest:
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {
+            "required": {
+                "images": ("IMAGE",),
+                # "sam2_model": ("SAM2MODEL",),
+                # "keep_model_loaded": ("BOOLEAN", {"default": True}),
+            },
+            "optional": {
+                # "coordinates_positive": ("STRING", ),
+                # "coordinates_negative": ("STRING", ),
+                # "reset_tracking": ("BOOLEAN", {"default": False}),
+                # "bboxes": ("BBOX", ),
+                # "individual_objects": ("BOOLEAN", {"default": False}),
+                # "mask": ("MASK", ),
+            },
+        }
+
+    RETURN_NAMES = ("PROCESSED_IMAGES", "MASK",)
+    RETURN_TYPES = ("IMAGE", "MASK",)
+    FUNCTION = "segment_images"
+    CATEGORY = "SAM2-Realtime"
+
+    def segment_images(
+        self,
+        images,
+        # sam2_model,
+        # coordinates_positive=None,
+        # coordinates_negative=None,
+        # reset_tracking=False,
+    ):
+        processed_frames = []
+        mask_list = []
+        # processed_frames.append(images)
+        # images_temp = images
+        # coordinates_positive_temp = coordinates_positive.__str__
+        # reset_tracking_temp = reset_tracking
+
+        # Stack masks and frames
+        stacked_masks = torch.stack(mask_list, dim=0)
+        stacked_frames = torch.stack(processed_frames, dim=0)
+        
+        return (stacked_frames, stacked_masks)
+
+
 NODE_CLASS_MAPPINGS = {
     "DownloadAndLoadSAM2RealtimeModel": DownloadAndLoadSAM2RealtimeModel,
-    "Sam2RealtimeSegmentation": Sam2RealtimeSegmentation
+    "Sam2RealtimeSegmentation": Sam2RealtimeSegmentation,
+    "Sam2RealtimeSegmentationTest": Sam2RealtimeSegmentationTest
 }
 
 NODE_DISPLAY_NAME_MAPPINGS = {
     "DownloadAndLoadSAM2RealtimeModel": "(Down)Load sam2_realtime Model",
-    "Sam2RealtimeSegmentation": "Sam2RealtimeSegmentation"
+    "Sam2RealtimeSegmentation": "Sam2RealtimeSegmentation",
+    "Sam2RealtimeSegmentationTest": "Sam2RealtimeSegmentationTest"
 }
