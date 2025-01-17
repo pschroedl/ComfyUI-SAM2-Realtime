@@ -85,7 +85,7 @@ def build_sam2_camera_predictor(
     apply_postprocessing=True,
 ):
     if GlobalHydra.instance().is_initialized():
-    GlobalHydra.instance().clear()
+        GlobalHydra.instance().clear()
 
     # Initialize Hydra to load the configuration
     config_path = "sam2_configs"

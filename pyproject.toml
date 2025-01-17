@@ -1,5 +1,5 @@
 [project]
-name = "SAM2_Realtime_Fork_TEST"
+name = "sam2_realtime_forktest"
 description = "This extension provides object segmentation capabilities for ComfyUI workflows"
 version = "0.0.3"
 license = { file = "LICENSE" }
@@ -24,6 +24,6 @@ requires = [
 build-backend = "setuptools.build_meta"
 
 [tool.comfy]
-PublisherId = "eliteencoder"
+PublisherId = "eliteprox"
 DisplayName = "ComfyUI-SAM2-Realtime-TEST"
 Icon = ""
